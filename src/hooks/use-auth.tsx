@@ -1,36 +1,61 @@
-import React, { createContext, useContext } from 'react'
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import pb from '@/lib/pocketbase/client'
 import { User } from '@/types/types'
-import { useLocalStorage } from '@/hooks/use-local-storage'
 
 interface AuthContextType {
   user: User | null
-  login: (email: string) => Promise<void>
+  isAuthenticated: boolean
+  login: (email: string, password?: string) => Promise<void>
   logout: () => void
+  loading: boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useLocalStorage<User | null>('crm_user', null)
-
-  const login = async (email: string) => {
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        setUser({ id: '1', email, role: 'admin', name: 'Administrador' })
-        resolve()
-      }, 1000)
-    })
-  }
-
-  const logout = () => setUser(null)
-
-  return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
+export const useAuth = () => {
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used within an AuthProvider')
+  return context
 }
 
-export function useAuth() {
-  const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
+export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [user, setUser] = useState<User | null>(
+    pb.authStore.isValid ? (pb.authStore.record as unknown as User) : null,
+  )
+  const [isAuthenticated, setIsAuthenticated] = useState(pb.authStore.isValid)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const unsubscribe = pb.authStore.onChange((_token, record) => {
+      setUser(pb.authStore.isValid ? (record as unknown as User) : null)
+      setIsAuthenticated(pb.authStore.isValid)
+    })
+
+    if (pb.authStore.isValid) {
+      pb.collection('users')
+        .authRefresh()
+        .catch(() => pb.authStore.clear())
+        .finally(() => setLoading(false))
+    } else {
+      if (pb.authStore.record) pb.authStore.clear()
+      setLoading(false)
+    }
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
+  const login = async (email: string, password?: string) => {
+    await pb.collection('users').authWithPassword(email, password || 'Admin@123456')
   }
-  return context
+
+  const logout = () => {
+    pb.authStore.clear()
+  }
+
+  return (
+    <AuthContext.Provider value={{ user, isAuthenticated, login, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }

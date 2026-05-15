@@ -32,7 +32,7 @@ export default function Index() {
 
     try {
       setLoading(true)
-      await login(email)
+      await login(email, password)
       toast({
         title: 'Bem-vindo!',
         description: 'Login efetuado com sucesso.',
@@ -40,7 +40,7 @@ export default function Index() {
     } catch (err) {
       toast({
         title: 'Erro',
-        description: 'Falha ao tentar entrar.',
+        description: 'Credenciais inválidas.',
         variant: 'destructive',
       })
     } finally {

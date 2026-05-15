@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   Table,
@@ -10,8 +11,10 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid } from 'recharts'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import { mockLeads, mockAgents, statusLabels, statusColors } from '@/data/mock-data'
-import { Users, PhoneCall, Percent, Clock } from 'lucide-react'
+import { Users, PhoneCall, Percent, Clock, Loader2 } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
+import { api } from '@/services/api'
+import { Lead } from '@/types/types'
 
 const chartData = [
   { name: 'Seg', leads: 4 },
@@ -30,13 +33,66 @@ const chartConfig = {
   },
 }
 
+export const statusLabels: Record<string, string> = {
+  novo: 'Novo',
+  em_atendimento: 'Em Atendimento',
+  tentativa: 'Tentativa',
+  visita_agendada: 'Visita Agendada',
+  proposta: 'Proposta',
+  negocio_fechado: 'Negócio Fechado',
+  perdido: 'Perdido',
+  no_show: 'No Show',
+}
+
+export const statusColors: Record<string, string> = {
+  novo: 'bg-blue-100 text-blue-800 hover:bg-blue-200 border-none',
+  em_atendimento: 'bg-purple-100 text-purple-800 hover:bg-purple-200 border-none',
+  tentativa: 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200 border-none',
+  visita_agendada: 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200 border-none',
+  proposta: 'bg-orange-100 text-orange-800 hover:bg-orange-200 border-none',
+  negocio_fechado: 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 border-none',
+  perdido: 'bg-red-100 text-red-800 hover:bg-red-200 border-none',
+  no_show: 'bg-rose-100 text-rose-800 hover:bg-rose-200 border-none',
+}
+
 export default function Dashboard() {
-  const totalLeads = mockLeads.length
-  const activeLeads = mockLeads.filter((l) => l.status === 'em_atendimento').length
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        const leadsData = await api.getLeads()
+        setLeads(leadsData)
+      } catch (error) {
+        toast({
+          title: 'Erro',
+          description: 'Erro ao carregar dados do dashboard.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [toast])
+
+  const totalLeads = leads.length
+  const activeLeads = leads.filter((l) => l.status === 'em_atendimento').length
   const conversionRate =
-    Math.round(
-      (mockLeads.filter((l) => l.status === 'negocio_fechado').length / totalLeads) * 100,
-    ) || 0
+    totalLeads > 0
+      ? Math.round((leads.filter((l) => l.status === 'negocio_fechado').length / totalLeads) * 100)
+      : 0
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in-up">
@@ -55,7 +111,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalLeads}</div>
-            <p className="text-xs text-muted-foreground">+12% em relação ao mês anterior</p>
+            <p className="text-xs text-muted-foreground">Todos os tempos</p>
           </CardContent>
         </Card>
         <Card className="shadow-sm">
@@ -85,7 +141,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">2m 15s</div>
-            <p className="text-xs text-muted-foreground">-30s em relação à média</p>
+            <p className="text-xs text-muted-foreground">Tempo médio da IA</p>
           </CardContent>
         </Card>
       </div>
@@ -135,19 +191,19 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="md:hidden space-y-4">
-              {mockLeads.map((lead) => (
+              {leads.slice(0, 5).map((lead) => (
                 <div
                   key={lead.id}
                   className="p-4 rounded-lg border bg-card text-card-foreground shadow-sm flex flex-col gap-2"
                 >
                   <div className="flex justify-between items-start">
                     <div className="font-semibold text-sm">{lead.name}</div>
-                    <Badge className={statusColors[lead.status]}>{statusLabels[lead.status]}</Badge>
+                    <Badge className={statusColors[lead.status] || 'bg-gray-100 text-gray-800'}>
+                      {statusLabels[lead.status] || lead.status}
+                    </Badge>
                   </div>
                   <div className="text-xs text-muted-foreground">{lead.phone}</div>
-                  <div className="text-xs">
-                    Agente: {mockAgents.find((a) => a.id === lead.agentId)?.name}
-                  </div>
+                  <div className="text-xs capitalize">Agente: {lead.agent}</div>
                 </div>
               ))}
             </div>
@@ -161,15 +217,17 @@ export default function Dashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {mockLeads.map((lead) => (
+                  {leads.slice(0, 5).map((lead) => (
                     <TableRow key={lead.id}>
                       <TableCell className="font-medium whitespace-nowrap">{lead.name}</TableCell>
                       <TableCell className="text-muted-foreground whitespace-nowrap">
                         {lead.phone}
                       </TableCell>
                       <TableCell>
-                        <Badge className={`whitespace-nowrap ${statusColors[lead.status]}`}>
-                          {statusLabels[lead.status]}
+                        <Badge
+                          className={`whitespace-nowrap ${statusColors[lead.status] || 'bg-gray-100 text-gray-800'}`}
+                        >
+                          {statusLabels[lead.status] || lead.status}
                         </Badge>
                       </TableCell>
                     </TableRow>

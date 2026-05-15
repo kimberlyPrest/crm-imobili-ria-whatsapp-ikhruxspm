@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { mockAgents as initialAgents } from '@/data/mock-data'
+import { useEffect, useState } from 'react'
 import {
   Card,
   CardContent,
@@ -23,9 +22,10 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Agent } from '@/types/types'
+import { MergedAgent } from '@/types/types'
 import { useToast } from '@/hooks/use-toast'
-import { Bot, Settings2 } from 'lucide-react'
+import { Bot, Settings2, Loader2 } from 'lucide-react'
+import { api } from '@/services/api'
 
 const availableTools = [
   'Qualificação Básica',
@@ -35,26 +35,76 @@ const availableTools = [
   'Análise de Crédito',
   'Consultar Contratos',
   'Emitir Boletos',
+  'Google Calendar',
 ]
 
 export default function Configuration() {
-  const [agents, setAgents] = useState(initialAgents)
-  const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
-  const [formData, setFormData] = useState<Agent | null>(null)
+  const [agents, setAgents] = useState<MergedAgent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editingAgent, setEditingAgent] = useState<MergedAgent | null>(null)
+  const [formData, setFormData] = useState<MergedAgent | null>(null)
   const { toast } = useToast()
 
-  const handleEditClick = (agent: Agent) => {
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [agentsData, configsData] = await Promise.all([
+          api.getAgents(),
+          api.getAgentConfigs(),
+        ])
+
+        const merged: MergedAgent[] = agentsData.map((a) => {
+          const config = configsData.find((c) => c.agent_id === a.id)
+          return {
+            ...a,
+            configId: config?.id || '',
+            prompt: config?.prompt || '',
+            tone: config?.tone || '',
+            rules: Array.isArray(config?.rules) ? config.rules.join('\n') : '',
+            tools: Array.isArray(config?.tools) ? config.tools : [],
+          }
+        })
+        setAgents(merged)
+      } catch (error) {
+        toast({
+          title: 'Erro',
+          description: 'Erro ao carregar configurações.',
+          variant: 'destructive',
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [toast])
+
+  const handleEditClick = (agent: MergedAgent) => {
     setEditingAgent(agent)
     setFormData({ ...agent })
   }
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData) return
 
-    setAgents(agents.map((a) => (a.id === formData.id ? formData : a)))
-    toast({ title: 'Sucesso', description: 'Configurações do agente atualizadas.' })
-    setEditingAgent(null)
+    try {
+      await api.updateAgent(formData.id, { active: formData.active })
+      if (formData.configId) {
+        const rulesArray = formData.rules.split('\n').filter((r) => r.trim())
+        await api.updateAgentConfig(formData.configId, {
+          prompt: formData.prompt,
+          tone: formData.tone,
+          rules: rulesArray,
+          tools: formData.tools,
+        })
+      }
+
+      setAgents(agents.map((a) => (a.id === formData.id ? formData : a)))
+      toast({ title: 'Sucesso', description: 'Configurações do agente atualizadas.' })
+      setEditingAgent(null)
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao salvar alterações.', variant: 'destructive' })
+    }
   }
 
   const handleToolToggle = (tool: string, checked: boolean) => {
@@ -63,12 +113,25 @@ export default function Configuration() {
     setFormData({ ...formData, tools })
   }
 
-  const handleActiveToggle = (id: string, active: boolean) => {
-    setAgents(agents.map((a) => (a.id === id ? { ...a, active } : a)))
-    toast({
-      title: active ? 'Agente ativado' : 'Agente desativado',
-      description: 'Status atualizado com sucesso.',
-    })
+  const handleActiveToggle = async (id: string, active: boolean) => {
+    try {
+      await api.updateAgent(id, { active })
+      setAgents(agents.map((a) => (a.id === id ? { ...a, active } : a)))
+      toast({
+        title: active ? 'Agente ativado' : 'Agente desativado',
+        description: 'Status atualizado com sucesso.',
+      })
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao atualizar status.', variant: 'destructive' })
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
   }
 
   return (
@@ -107,7 +170,7 @@ export default function Configuration() {
             <CardContent className="flex-1 space-y-4">
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground font-medium">Tom de Voz</span>
-                <p className="text-sm font-medium">{agent.tone}</p>
+                <p className="text-sm font-medium capitalize">{agent.tone || 'Padrão'}</p>
               </div>
               <div className="space-y-1">
                 <span className="text-xs text-muted-foreground font-medium">Ferramentas</span>
@@ -151,12 +214,18 @@ export default function Configuration() {
               <div className="space-y-4">
                 <div className="grid gap-2">
                   <Label htmlFor="tone">Tom de Voz</Label>
-                  <Input
+                  <select
                     id="tone"
                     value={formData.tone}
                     onChange={(e) => setFormData({ ...formData, tone: e.target.value })}
-                    placeholder="Ex: Profissional e amigável"
-                  />
+                    className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <option value="">Selecione...</option>
+                    <option value="formal">Formal</option>
+                    <option value="casual">Casual</option>
+                    <option value="tecnico">Técnico</option>
+                    <option value="amigavel">Amigável</option>
+                  </select>
                 </div>
 
                 <div className="grid gap-2">
@@ -170,7 +239,7 @@ export default function Configuration() {
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="rules">Regras de Negócio</Label>
+                  <Label htmlFor="rules">Regras de Negócio (Uma por linha)</Label>
                   <Textarea
                     id="rules"
                     value={formData.rules}

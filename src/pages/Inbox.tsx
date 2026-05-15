@@ -1,31 +1,91 @@
-import { useState, useMemo } from 'react'
-import { mockLeads, mockMessages, statusColors, statusLabels } from '@/data/mock-data'
+import { useState, useMemo, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { Search, Send, Bot, User } from 'lucide-react'
-import { Lead } from '@/types/types'
+import { Search, Send, Bot, User, Loader2 } from 'lucide-react'
+import { Lead, Message } from '@/types/types'
+import { api } from '@/services/api'
+import { useToast } from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/use-auth'
+import { statusColors, statusLabels } from '@/pages/Dashboard'
 
 export default function Inbox() {
   const [search, setSearch] = useState('')
-  const [selectedLead, setSelectedLead] = useState<Lead | null>(mockLeads[0])
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
   const [messageInput, setMessageInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const { toast } = useToast()
+  const { user } = useAuth()
+
+  useEffect(() => {
+    const fetchLeads = async () => {
+      try {
+        const data = await api.getLeads()
+        setLeads(data)
+        if (data.length > 0) setSelectedLead(data[0])
+      } catch (error) {
+        toast({ title: 'Erro', description: 'Erro ao carregar leads.', variant: 'destructive' })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchLeads()
+  }, [toast])
+
+  useEffect(() => {
+    if (!selectedLead) return
+    const fetchMessages = async () => {
+      try {
+        const data = await api.getMessages(selectedLead.id)
+        setMessages(data)
+      } catch (error) {
+        toast({ title: 'Erro', description: 'Erro ao carregar mensagens.', variant: 'destructive' })
+      }
+    }
+    fetchMessages()
+  }, [selectedLead, toast])
 
   const filteredLeads = useMemo(() => {
-    return mockLeads.filter(
+    return leads.filter(
       (l) => l.name.toLowerCase().includes(search.toLowerCase()) || l.phone.includes(search),
     )
-  }, [search])
+  }, [search, leads])
 
-  const currentMessages = useMemo(() => {
-    if (!selectedLead) return []
-    return mockMessages
-      .filter((m) => m.leadId === selectedLead.id)
-      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-  }, [selectedLead])
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!messageInput.trim() || !selectedLead || !user) return
+
+    try {
+      setSending(true)
+      const newMsg = await api.createMessage({
+        lead_id: selectedLead.id,
+        user_id: user.id,
+        sender: 'agent',
+        text: messageInput.trim(),
+        agent_type: selectedLead.agent,
+      })
+      setMessages([...messages, newMsg])
+      setMessageInput('')
+    } catch (error) {
+      toast({ title: 'Erro', description: 'Erro ao enviar mensagem.', variant: 'destructive' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-[calc(100vh-8rem)] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] bg-background rounded-xl border shadow-sm overflow-hidden animate-fade-in">
@@ -55,9 +115,9 @@ export default function Inbox() {
                     <span className="font-semibold text-sm truncate">{lead.name}</span>
                     <Badge
                       variant="outline"
-                      className={`text-[10px] px-1.5 py-0 font-normal ${statusColors[lead.status]}`}
+                      className={`text-[10px] px-1.5 py-0 font-normal ${statusColors[lead.status] || 'bg-gray-100 text-gray-800'}`}
                     >
-                      {statusLabels[lead.status]}
+                      {statusLabels[lead.status] || lead.status}
                     </Badge>
                   </div>
                   <div className="text-xs text-muted-foreground truncate">{lead.phone}</div>
@@ -85,7 +145,7 @@ export default function Inbox() {
                 <div>
                   <h2 className="font-semibold text-sm">{selectedLead.name}</h2>
                   <p className="text-xs text-muted-foreground">
-                    {selectedLead.phone} • {selectedLead.neighborhood}
+                    {selectedLead.phone} • {selectedLead.neighborhood || 'Sem bairro'}
                   </p>
                 </div>
               </div>
@@ -93,8 +153,8 @@ export default function Inbox() {
 
             <ScrollArea className="flex-1 p-4 bg-slate-50/50 dark:bg-slate-900/50">
               <div className="space-y-4">
-                {currentMessages.length > 0 ? (
-                  currentMessages.map((msg) => {
+                {messages.length > 0 ? (
+                  messages.map((msg) => {
                     const isAgent = msg.sender === 'agent'
                     return (
                       <div
@@ -123,7 +183,7 @@ export default function Inbox() {
                           <div
                             className={`text-[10px] mt-1 opacity-70 ${isAgent ? 'text-left' : 'text-right'}`}
                           >
-                            {new Date(msg.timestamp).toLocaleTimeString([], {
+                            {new Date(msg.created).toLocaleTimeString([], {
                               hour: '2-digit',
                               minute: '2-digit',
                             })}
@@ -141,17 +201,25 @@ export default function Inbox() {
             </ScrollArea>
 
             <div className="p-4 border-t bg-card">
-              <form className="flex items-end gap-2" onSubmit={(e) => e.preventDefault()}>
+              <form className="flex items-end gap-2" onSubmit={handleSendMessage}>
                 <Textarea
                   placeholder="Digite uma mensagem para intervir no atendimento..."
                   className="min-h-[60px] max-h-[120px] resize-none"
                   value={messageInput}
                   onChange={(e) => setMessageInput(e.target.value)}
+                  disabled={sending}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSendMessage(e)
+                    }
+                  }}
                 />
                 <Button
+                  type="submit"
                   size="icon"
                   className="shrink-0 h-10 w-10 rounded-full"
-                  disabled={!messageInput.trim()}
+                  disabled={!messageInput.trim() || sending}
                 >
                   <Send className="h-4 w-4" />
                 </Button>

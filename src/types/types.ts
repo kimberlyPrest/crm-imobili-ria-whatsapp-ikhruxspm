@@ -20,11 +20,11 @@ export interface Lead {
   phone: string
   name: string
   status: LeadStatus
-  agentId: string
+  agent: string
   neighborhood: string
-  priceRange: string
-  createdAt: string
-  updatedAt: string
+  price_range: string
+  created: string
+  updated: string
 }
 
 export type AgentType = 'chefe' | 'vendas' | 'locacao' | 'juridico'
@@ -33,25 +33,45 @@ export interface Agent {
   id: string
   name: string
   type: AgentType
+  active: boolean
+  created: string
+  updated: string
+}
+
+export interface AgentConfig {
+  id: string
+  agent_id: string
+  prompt: string
+  tone: string
+  rules: string[]
+  tools: string[]
+  created: string
+  updated: string
+}
+
+export interface MergedAgent extends Agent {
+  configId: string
   prompt: string
   tone: string
   rules: string
   tools: string[]
-  active: boolean
 }
 
 export interface Message {
   id: string
-  leadId: string
+  lead_id: string
   sender: 'user' | 'agent'
   text: string
-  timestamp: string
+  created: string
 }
 
 export interface Metric {
-  leadId: string
-  agentId: string
+  id: string
+  lead_id: string
+  agent_id: string
   status: string
-  responseTime: number
-  conversionRate: number
+  response_time_seconds: number
+  conversion_stage: string
+  created: string
+  updated: string
 }
